@@ -1,5 +1,6 @@
 import os
 import sys
+import base64
 import urllib.request
 import http.cookiejar
 from time import sleep
@@ -44,6 +45,7 @@ class KazetennScraper:
 
     def download_journal(self, date, filename=None, edition=None):
         self.seen_pages = set()
+        self.pages_num = 0
         self.dl_pages = []
         self.dl_prefix = date
         edition = edition or self.DEFAULT_EDITION
@@ -68,6 +70,18 @@ class KazetennScraper:
         page_urls = set([url for url in urls if url.startswith("https://wsjournal.ouest-france.fr/bdc/page")])
         new_pages = page_urls - self.seen_pages
         self.seen_pages |= page_urls
+        for page in new_pages:
+            filename = f"tmp/tmp/{self.dl_prefix}_{self.pages_num}.pdf"
+            with open(filename, "wb") as out_file:
+                text_content = ""
+                for entry in [entry for entry in har_data["entries"] if entry["request"]["url"] == page]:
+                    print(page, entry['response']['content']['size'])
+                    text_content += entry['response']['content']['text']
+                max_chunk_size = 1048576
+                for x in range(0, len(text_content), max_chunk_size):
+                    chunk = text_content[x:x+max_chunk_size]
+                    print(filename, out_file.write(base64.b64decode(chunk)))
+            self.pages_num += 1
         return new_pages
 
     def change_page(self):
@@ -131,6 +145,11 @@ class KazetennScraper:
         for pdf in self.dl_pages:
             merger.append(pdf)
         merger.write(filename)
+        merger.close()
+        merger = PdfWriter()
+        for pdf in self.dl_pages:
+            merger.append('tmp/' + pdf)
+        merger.write("test_" + str(filename))
         merger.close()
         for pdf in self.dl_pages:
             os.remove(pdf)
