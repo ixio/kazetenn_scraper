@@ -1,4 +1,5 @@
 import logging
+import subprocess
 from pathlib import Path
 from time import sleep
 
@@ -29,17 +30,25 @@ def main(scraper):
     if pdfs != []:
         scrap_date = pendulum.parse(pdfs[-1].split(".")[0]) + pendulum.duration(days=1)
 
-    logging.info("start scraping with date %s" % scrap_date.to_date_string())
+    # TODO : the simplest is perhaps to try the page here and let the human connect before trying realy scraping
+    scraper.browser.get(
+        f"https://www.ouest-france.fr/premium/journal/journal-ouest-france/{scrap_date.to_date_string()}/?edition={config["edition"]}"
+    )
+    input("Press Enter to continue...")
+
+    logging.info("start scraping with date %s", scrap_date.to_date_string())
     while scrap_date < pendulum.tomorrow():
         date_string = scrap_date.to_date_string()
-        folder = Path(f"./archives/{scrap_date.year}/{scrap_date.month:02}")
+        folder = Path(f"./archives/{scrap_date.year}/{scrap_date.month:02}/{scrap_date.day:02}")
         folder.mkdir(parents=True, exist_ok=True)
-        filepath = folder / f"{date_string}.pdf"
         try:
-            scraper.download_journal(date_string, filename=filepath)
-            logging.info("created %s" % filepath)
+            scraper.download_journal(date_string, dl_path=str(folder))
+            logging.info("created %s (launching merger)", folder)
+            filename = f"./archives/{scrap_date.year}/{scrap_date.month:02}/{scrap_date.to_date_string()}.pdf"
+            subprocess.Popen(["ruby", "merger.rb", str(folder), filename])
         except Exception as e:
-            logging.error("failed to create %s with error: %s" % (filepath, e))
+            logging.error("failed to create %s with error: %s(%s)", folder, e.__class__.__name__, e)
+
         scrap_date += pendulum.duration(days=1)
 
 

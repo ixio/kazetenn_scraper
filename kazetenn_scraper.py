@@ -1,17 +1,18 @@
-import os
 import sys
-import base64
 import urllib.request
 import http.cookiejar
 from time import sleep
 
 import yaml
 import pendulum
-from pypdf import PdfWriter
+from pypdf import PdfReader
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions
+
+# Find pdf header :
+# pdftotext -W 941 -H 50 2015-02-13_9.pdf -
+# we can then use PDFTK to reconstruct the pdf
+# maybe a nice quick and dirty ruby/bash script would do the trick
 
 
 class MissingPagesError(RuntimeError):
@@ -43,11 +44,11 @@ class KazetennScraper:
         self.browser.close()
         self.browser.quit()
 
-    def download_journal(self, date, filename=None, edition=None):
+    def download_journal(self, date, dl_path=None, edition=None):
         self.seen_pages = set()
         self.pages_num = 0
         self.dl_pages = []
-        self.dl_prefix = date
+        self.dl_path = dl_path or './tmp/'
         edition = edition or self.DEFAULT_EDITION
         self.browser.get(f"https://www.ouest-france.fr/premium/journal/journal-ouest-france/{date}/?edition={edition}")
         self.browser.find_element(By.CSS_SELECTOR, "div.container-parution").click()
@@ -57,13 +58,9 @@ class KazetennScraper:
         for k in range(0, self.number_of_pages // 2):
             self.change_page()
             self.download_new_pages()
-        self.reconstruct_pdf(filename or f"{date}.pdf")
+        self.check_pages_number()
 
     def download_new_pages(self):
-        for page_url in self.new_pages():
-            self.download_page(page_url)
-
-    def new_pages(self):
         # see https://defgsus.github.io/blog/2021/03/07/selenium-firefox-har-extract.html
         har_data = self.browser.execute_async_script("HAR.triggerExport().then(arguments[0]);")
         urls = [entry["request"]["url"] for entry in har_data["entries"]]
@@ -71,18 +68,19 @@ class KazetennScraper:
         new_pages = page_urls - self.seen_pages
         self.seen_pages |= page_urls
         for page in new_pages:
-            filename = f"tmp/tmp/{self.dl_prefix}_{self.pages_num}.pdf"
+            page_number = len(self.dl_pages)
+            filename = f"{self.dl_path}/{page_number:02}.pdf"
             with open(filename, "wb") as out_file:
-                text_content = ""
                 for entry in [entry for entry in har_data["entries"] if entry["request"]["url"] == page]:
-                    print(page, entry['response']['content']['size'])
-                    text_content += entry['response']['content']['text']
-                max_chunk_size = 1048576
-                for x in range(0, len(text_content), max_chunk_size):
-                    chunk = text_content[x:x+max_chunk_size]
-                    print(filename, out_file.write(base64.b64decode(chunk)))
-            self.pages_num += 1
-        return new_pages
+                    text_content = entry["response"]["content"]["text"]
+                    max_chunk_size = 1048576
+                    for x in range(0, len(text_content), max_chunk_size):
+                        chunk = text_content[x : x + max_chunk_size]
+            try:
+                PdfReader(filename)
+            except:
+                self.download_page(page, filename)
+            self.dl_pages.append(filename)
 
     def change_page(self):
         iframe = self.browser.find_element(By.CSS_SELECTOR, "div.parution-reader-popin > div.popin-content > iframe")
@@ -111,7 +109,7 @@ class KazetennScraper:
         if name == "datadome":
             self.cookie = "datadome=" + cookie
 
-    def download_page(self, url):
+    def download_page(self, url, filename):
         cookie_jar = http.cookiejar.CookieJar()
         opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
         urllib.request.install_opener(opener)
@@ -119,8 +117,6 @@ class KazetennScraper:
         req = urllib.request.Request(url)
         req.add_header("Cookie", self.cookie)
 
-        page_number = len(self.dl_pages)
-        filename = f"tmp/{self.dl_prefix}_{page_number}.pdf"
         with urllib.request.urlopen(req) as response:
             with open(filename, "wb") as out_file:
                 while True:
@@ -132,27 +128,13 @@ class KazetennScraper:
                     else:
                         break
 
-        self.dl_pages.append(filename)
-
-    def reconstruct_pdf(self, filename):
+    def check_pages_number(self):
         n_wanted = self.number_of_pages
         n_real = len(self.dl_pages)
         if n_wanted != n_real:
             raise MissingPagesError(
-                f"Not generating {filename}, since journal has {n_wanted} pages and we save {n_real} pages."
+                f"Issue with {self.dl_path}, since journal has {n_wanted} pages and we save {n_real} pages."
             )
-        merger = PdfWriter()
-        for pdf in self.dl_pages:
-            merger.append(pdf)
-        merger.write(filename)
-        merger.close()
-        merger = PdfWriter()
-        for pdf in self.dl_pages:
-            merger.append('tmp/' + pdf)
-        merger.write("test_" + str(filename))
-        merger.close()
-        for pdf in self.dl_pages:
-            os.remove(pdf)
 
 
 if __name__ == "__main__":
