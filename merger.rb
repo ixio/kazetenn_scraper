@@ -68,7 +68,7 @@ def main(pdf_folder, filename)
   if File.exist?(filename) && File.size(filename) > 1_000_000 # quick&simple proxy for success
     `rm -r #{pdf_folder}`
   else
-    File.write('meger.log', "#{Time.now.to_s}: Failed to create #{filename} from #{pdf_folder}\n", mode: 'a+')
+    File.write('merger.log', "#{Time.now.to_s}: Failed to create #{filename} from #{pdf_folder}\n", mode: 'a+')
   end
 end
 

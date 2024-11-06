@@ -17,24 +17,18 @@ logging.basicConfig(
 FIRST_DATE = pendulum.local(2015, 2, 1)
 
 
-def main(scraper):
+def scrap_from_date(scraper, scrap_date):
     config = yaml.safe_load(open("config.yaml"))
     for name, value in config["cookies"].items():
         scraper.add_cookie(name, value)
     if "edition" in config:
         scraper.DEFAULT_EDITION = config["edition"]
 
-    # Determine at what date we should start
-    scrap_date = FIRST_DATE
-    pdfs = sorted([pdf.name for pdf in Path("./archives").glob("**/*.pdf")])
-    if pdfs != []:
-        scrap_date = pendulum.parse(pdfs[-1].split(".")[0]) + pendulum.duration(days=1)
-
     # TODO : the simplest is perhaps to try the page here and let the human connect before trying realy scraping
-    scraper.browser.get(
-        f"https://www.ouest-france.fr/premium/journal/journal-ouest-france/{scrap_date.to_date_string()}/?edition={config["edition"]}"
-    )
-    input("Press Enter to continue...")
+    #scraper.browser.get(
+    #    f"https://www.ouest-france.fr/premium/journal/journal-ouest-france/{scrap_date.to_date_string()}/?edition={config["edition"]}"
+    #)
+    #input("Press Enter to continue...")
 
     logging.info("start scraping with date %s", scrap_date.to_date_string())
     while scrap_date < pendulum.tomorrow():
@@ -52,12 +46,21 @@ def main(scraper):
         scrap_date += pendulum.duration(days=1)
 
 
+def main():
+    scrap_date = FIRST_DATE
+    while scrap_date < pendulum.local(2024, 10, 5):
+        pdfs = sorted([pdf.name for pdf in Path("./archives").glob("*/*/*.pdf")])
+        if pdfs != []:
+            scrap_date = pendulum.parse(pdfs[-1].split(".")[0]) + pendulum.duration(days=1)
+        logging.info("launching scraper")
+        scraper = KazetennScraper()
+        try:
+            scrap_from_date(scraper, scrap_date)
+        except KeyboardInterrupt:
+            logging.info("got keyboard interrupt signal, shutting down")
+        del scraper
+        logging.info("shutting down and trying again in 5mn")
+        sleep(300)
+
 if __name__ == "__main__":
-    logging.info("launching scraper")
-    scraper = KazetennScraper()
-    try:
-        main(scraper)
-    except KeyboardInterrupt:
-        logging.info("got keyboard interrupt signal, shutting down")
-    del scraper
-    sleep(1)
+    main()

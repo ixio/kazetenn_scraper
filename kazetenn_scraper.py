@@ -1,4 +1,5 @@
 import sys
+import base64
 import urllib.request
 import http.cookiejar
 from time import sleep
@@ -51,7 +52,7 @@ class KazetennScraper:
         self.dl_path = dl_path or './tmp/'
         edition = edition or self.DEFAULT_EDITION
         self.browser.get(f"https://www.ouest-france.fr/premium/journal/journal-ouest-france/{date}/?edition={edition}")
-        self.browser.find_element(By.CSS_SELECTOR, "div.container-parution").click()
+        self.browser.find_element(By.CSS_SELECTOR, "div.content-container a img").click()
         self.number_of_pages = self.get_number_of_pages()
         sleep(1)
         self.download_new_pages()
@@ -72,12 +73,16 @@ class KazetennScraper:
             filename = f"{self.dl_path}/{page_number:02}.pdf"
             with open(filename, "wb") as out_file:
                 for entry in [entry for entry in har_data["entries"] if entry["request"]["url"] == page]:
-                    text_content = entry["response"]["content"]["text"]
+                    try:
+                        text_content = entry["response"]["content"]["text"]
+                    except KeyError:
+                        text_content = ""
                     max_chunk_size = 1048576
                     for x in range(0, len(text_content), max_chunk_size):
                         chunk = text_content[x : x + max_chunk_size]
+                        out_file.write(base64.b64decode(chunk))
             try:
-                PdfReader(filename)
+                PdfReader(filename, strict=True).get_page(0)
             except:
                 self.download_page(page, filename)
             self.dl_pages.append(filename)
