@@ -5,8 +5,10 @@ from time import sleep
 
 import yaml
 import pendulum
+from selenium.common.exceptions import InvalidSessionIdException
 
 from kazetenn_scraper import KazetennScraper
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,10 +37,10 @@ def scrap_from_date(scraper, scrap_date):
         date_string = scrap_date.to_date_string()
         folder = Path(f"./archives/{scrap_date.year}/{scrap_date.month:02}/{scrap_date.day:02}")
         folder.mkdir(parents=True, exist_ok=True)
+        filename = f"./archives/{scrap_date.year}/{scrap_date.month:02}/{scrap_date.to_date_string()}.pdf"
         try:
             scraper.download_journal(date_string, dl_path=str(folder))
             logging.info("created %s (launching merger)", folder)
-            filename = f"./archives/{scrap_date.year}/{scrap_date.month:02}/{scrap_date.to_date_string()}.pdf"
             subprocess.Popen(["ruby", "merger.rb", str(folder), filename])
         except Exception as e:
             logging.error("failed to create %s with error: %s(%s)", folder, e.__class__.__name__, e)
@@ -62,5 +64,51 @@ def main():
         logging.info("shutting down and trying again in 5mn")
         sleep(300)
 
+def main_scrap_missing():
+    config = yaml.safe_load(open("config.yaml"))
+    dates = set()
+    date = pendulum.local(2020, 2, 1)
+    while date < pendulum.local(2024, 11, 5):
+        dates.add(date.to_date_string())
+        date += pendulum.duration(days=1)
+    old_diff = set()
+    new_diff = dates
+    while old_diff != new_diff:
+        old_diff = new_diff
+        pdfs = set([pdf.name.replace('.pdf', '') for pdf in Path("./archives").glob("*/*/*.pdf")])
+        new_diff = dates - pdfs
+
+        logging.info("launching scraper")
+        scraper = KazetennScraper()
+        for name, value in config["cookies"].items():
+            scraper.add_cookie(name, value)
+        if "edition" in config:
+            scraper.DEFAULT_EDITION = config["edition"]
+        try:
+            for date_string in sorted(new_diff):
+                if date_string[5:] == '01-01' or date_string[5:] == '05-01' or date_string[5:] == '12-25':
+                    logging.info("skipping %s", date_string)
+                    continue
+                scrap_date = pendulum.parse(date_string)
+                folder = Path(f"./archives/{scrap_date.year}/{scrap_date.month:02}/{scrap_date.day:02}")
+                folder.mkdir(parents=True, exist_ok=True)
+                filename = f"./archives/{scrap_date.year}/{scrap_date.month:02}/{scrap_date.to_date_string()}.pdf"
+                try:
+                    scraper.download_journal(date_string, dl_path=str(folder))
+                    logging.info("created %s (launching merger)", folder)
+                    subprocess.Popen(["ruby", "merger.rb", str(folder), filename])
+                except InvalidSessionIdException as e:
+                    logging.error("failed to create %s with error: %s", filename, e.__class__.__name__)
+                    logging.error("stopping scraping because of error: %s", repr(e))
+                    break
+                except Exception as e:
+                    logging.error("failed to create %s with error: %s", filename, repr(e))
+        except KeyboardInterrupt:
+            logging.info("got keyboard interrupt signal, shutting down")
+        del scraper
+        logging.info("shutting down and trying again in 5mn")
+        sleep(300)
+    logging.info("No new file downloaded, ending this")
+
 if __name__ == "__main__":
-    main()
+    main_scrap_missing()
